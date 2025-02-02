@@ -15,8 +15,8 @@
     <!-- 📌 Calendario FullCalendar -->
     <FullCalendar class="calendario" :options="calendarOptions" />
 
-    <!-- 📌 Modal para seleccionar Masajista y Hora -->
-    <Dialog v-model:visible="showDialog" header="Seleccionar Masajista y Hora" modal>
+    <!-- 📌 Modal para CREAR y EDITAR Citas -->
+    <Dialog v-model:visible="showDialog" :header="selectedEvent.id ? 'Editar Cita' : 'Crear Reserva'" modal>
       <div class="p-field">
         <label>Cliente</label>
         <InputText v-model="selectedCliente.nombre" disabled />
@@ -29,7 +29,13 @@
         <label for="rangoHoras">Selecciona el Rango de Horas</label>
         <Dropdown v-model="hora" :options="rangosHoras" placeholder="Seleccionar..." />
       </div>
-      <Button label="Confirmar Reserva" icon="pi pi-check" @click="agendarCita" />
+      
+      <!-- Botón de Guardar -->
+      <Button v-if="selectedEvent.id" label="Guardar Cambios" icon="pi pi-check" @click="guardarEdicion" />
+      <Button v-else label="Confirmar Reserva" icon="pi pi-check" @click="agendarCita" />
+
+      <!-- Botón de Eliminar (solo en edición) -->
+      <Button v-if="selectedEvent.id" label="Eliminar Cita" icon="pi pi-trash" class="p-button-danger" @click="eliminarEvento(selectedEvent.id)" />
     </Dialog>
   </div>
 </template>
@@ -53,7 +59,7 @@ const selectedDate = ref(null);
 const selectedCliente = ref({});
 const selectedMasajista = ref(null);
 const hora = ref(null);
-const currentEventId = ref(null); // Para almacenar el ID del evento que se está editando
+const selectedEvent = ref({});
 
 const clientes = ref([
   { id: 1, nombre: 'Juan Pérez' },
@@ -75,43 +81,39 @@ const rangosHoras = ref([
   '15:00 - 16:00'
 ]);
 
-const calendarEvents = ref([]); // Lista de eventos independientes
+const calendarEvents = ref([]);
 
 const calendarOptions = ref({
   plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin],
   initialView: 'timeGridWeek',
   editable: true,
   droppable: true,
+  eventResizableFromStart: false,
+  eventDurationEditable: false,
+  allDaySlot: true,
   events: calendarEvents.value,
   headerToolbar: {
     left: 'prev,next today',
     center: 'title',
     right: 'dayGridMonth,timeGridWeek,timeGridDay'
   },
-  eventReceive: (info) => {
-    const vistaActual = info.view.type;
+  eventClick: (info) => {
+    // ✅ Modo edición
+    selectedEvent.value = calendarEvents.value.find(evento => evento.id === info.event.id);
+    selectedCliente.value = { nombre: selectedEvent.value.title.replace("Cita con ", "") };
+    selectedMasajista.value = masajistas.value.find(m => m.nombre === selectedEvent.value.masajista) || null;
+    hora.value = selectedEvent.value.hora || null;
 
-    // Capturamos el cliente seleccionado y generamos un ID único
-    selectedCliente.value = JSON.parse(JSON.stringify(clientes.value.find(cliente => cliente.nombre === info.event.title)));
-    selectedDate.value = info.event.startStr;
-    currentEventId.value = generateUniqueId(); // Generamos un ID único para la cita
-
-    // Si la vista es mes o semana, mostramos el modal y eliminamos el evento temporal
-    if (vistaActual === 'dayGridMonth' || vistaActual === 'timeGridWeek') {
-      showDialog.value = true;
-      info.event.remove();
-    } else {
-      // Si está en vista de día, agregamos la cita directamente
-      agregarEvento(selectedCliente.value.nombre, selectedDate.value);
-    }
+    showDialog.value = true;
   },
-  eventDrop: (info) => {
-    // ✅ Guardamos manualmente la nueva fecha cuando se mueve un evento
-    const eventoIndex = calendarEvents.value.findIndex(evento => evento.id === info.event.id);
-    if (eventoIndex !== -1) {
-      calendarEvents.value[eventoIndex].start = info.event.startStr;
-      actualizarEventos();
-    }
+  eventReceive: (info) => {
+    // ✅ Modo creación
+    selectedCliente.value = clientes.value.find(cliente => cliente.nombre === info.event.title);
+    selectedDate.value = info.event.startStr;
+    selectedEvent.value = {}; // Asegurar que no esté en modo edición
+    showDialog.value = true;
+
+    info.event.remove(); // Se elimina para evitar duplicados hasta confirmar la reserva
   }
 });
 
@@ -121,42 +123,57 @@ onMounted(() => {
     itemSelector: '.fc-event',
     eventData: function(eventEl) {
       return {
-        id: generateUniqueId(), // Asignamos un ID único al evento
+        id: generateUniqueId(),
         title: eventEl.getAttribute('data-nombre'),
-        duration: '01:00' // Duración predeterminada
+        duration: '01:00'
       };
     }
   });
 });
 
-// ✅ Agregar evento correctamente
-const agregarEvento = (nombre, fecha) => {
-  const nuevaCita = {
-    id: generateUniqueId(),
-    title: `Cita con ${nombre}`,
-    start: fecha,
-    editable: true
-  };
-
-  calendarEvents.value = [...calendarEvents.value, nuevaCita]; // ✅ Se genera un nuevo array para evitar referencias compartidas
-  actualizarEventos();
-};
-
-// ✅ Forzar actualización en Vue
-const actualizarEventos = async () => {
-  await nextTick();
-  calendarOptions.value.events = [...calendarEvents.value]; // ✅ Se genera un nuevo array para evitar que Vue reactive todas las citas
-};
-
-// ✅ Agregar la cita después de completar el formulario
+// ✅ Crear nueva cita
 const agendarCita = () => {
   if (!selectedMasajista.value || !hora.value) {
     alert('Por favor, completa todos los campos.');
     return;
   }
 
-  agregarEvento(`${selectedCliente.value.nombre} (Masajista: ${selectedMasajista.value.nombre}, ${hora.value})`, selectedDate.value);
+  const nuevaCita = {
+    id: generateUniqueId(),
+    title: `Cita con ${selectedCliente.value.nombre}`,
+    start: selectedDate.value,
+    masajista: selectedMasajista.value.nombre,
+    hora: hora.value,
+    editable: true
+  };
+
+  calendarEvents.value = [...calendarEvents.value, nuevaCita];
+  actualizarEventos();
   showDialog.value = false;
+};
+
+// ✅ Guardar edición del evento
+const guardarEdicion = () => {
+  const eventoIndex = calendarEvents.value.findIndex(evento => evento.id === selectedEvent.value.id);
+  if (eventoIndex !== -1) {
+    calendarEvents.value[eventoIndex].masajista = selectedMasajista.value ? selectedMasajista.value.nombre : '';
+    calendarEvents.value[eventoIndex].hora = hora.value || '';
+  }
+  actualizarEventos();
+  showDialog.value = false;
+};
+
+// ✅ Eliminar evento
+const eliminarEvento = (id) => {
+  calendarEvents.value = calendarEvents.value.filter(evento => evento.id !== id);
+  actualizarEventos();
+  showDialog.value = false;
+};
+
+// ✅ Forzar actualización en Vue
+const actualizarEventos = async () => {
+  await nextTick();
+  calendarOptions.value.events = [...calendarEvents.value];
 };
 </script>
 
