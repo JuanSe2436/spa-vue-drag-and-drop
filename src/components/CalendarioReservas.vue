@@ -29,6 +29,10 @@
         <label for="rangoHoras">Selecciona el Rango de Horas</label>
         <Dropdown v-model="hora" :options="rangosHoras" placeholder="Seleccionar..." />
       </div>
+      <div class="p-field">
+        <label for="descripcion">Descripción</label>
+        <Textarea v-model="descripcion" placeholder="Agrega detalles sobre la cita..." rows="3" />
+      </div>
       
       <!-- Botón de Guardar -->
       <Button v-if="selectedEvent.id" label="Guardar Cambios" icon="pi pi-check" @click="guardarEdicion" />
@@ -49,6 +53,7 @@ import interactionPlugin, { Draggable } from '@fullcalendar/interaction';
 import Dialog from 'primevue/dialog';
 import Dropdown from 'primevue/dropdown';
 import InputText from 'primevue/inputtext';
+import Textarea from 'primevue/textarea';
 import Button from 'primevue/button';
 
 // Generador de IDs únicos
@@ -59,6 +64,7 @@ const selectedDate = ref(null);
 const selectedCliente = ref({});
 const selectedMasajista = ref(null);
 const hora = ref(null);
+const descripcion = ref('');
 const selectedEvent = ref({});
 
 const clientes = ref([
@@ -78,7 +84,11 @@ const rangosHoras = ref([
   '10:00 - 11:00',
   '11:00 - 12:00',
   '14:00 - 15:00',
-  '15:00 - 16:00'
+  '15:00 - 16:00',
+  '16:00 - 17:00',
+  '17:00 - 18:00',
+  '18:00 - 19:00',
+
 ]);
 
 const calendarEvents = ref([]);
@@ -97,25 +107,120 @@ const calendarOptions = ref({
     center: 'title',
     right: 'dayGridMonth,timeGridWeek,timeGridDay'
   },
+  eventContent: renderEventContent,
   eventClick: (info) => {
-    // ✅ Modo edición
     selectedEvent.value = calendarEvents.value.find(evento => evento.id === info.event.id);
     selectedCliente.value = { nombre: selectedEvent.value.title.replace("Cita con ", "") };
     selectedMasajista.value = masajistas.value.find(m => m.nombre === selectedEvent.value.masajista) || null;
     hora.value = selectedEvent.value.hora || null;
+    descripcion.value = selectedEvent.value.descripcion || '';
 
     showDialog.value = true;
   },
   eventReceive: (info) => {
-    // ✅ Modo creación
     selectedCliente.value = clientes.value.find(cliente => cliente.nombre === info.event.title);
     selectedDate.value = info.event.startStr;
-    selectedEvent.value = {}; // Asegurar que no esté en modo edición
+    selectedEvent.value = {}; 
+    descripcion.value = ''; 
     showDialog.value = true;
 
-    info.event.remove(); // Se elimina para evitar duplicados hasta confirmar la reserva
+    info.event.remove(); 
+  },
+  eventDrop: (info) => {
+    const evento = calendarEvents.value.find(e => e.id === info.event.id);
+    if (!evento) return;
+
+    const nuevaFecha = info.event.startStr;
+
+    // ✅ Validar si el masajista ya tiene una cita en esa fecha y hora
+    if (estaMasajistaOcupado(evento.masajista, nuevaFecha, evento.hora, evento.id)) {
+      alert(`El masajista ${evento.masajista} ya tiene una cita a las ${evento.hora}. No se puede mover.`);
+      info.revert(); // ❌ Volver a la posición original
+    } else {
+      evento.start = nuevaFecha; // ✅ Permitir el cambio si está libre
+      actualizarEventos();
+    }
   }
 });
+
+function renderEventContent(arg) {
+  const event = calendarEvents.value.find(e => e.id === arg.event.id);
+  if (!event) return { domNodes: [] };
+
+  const estado = determinarEstado(event);
+  const colores = {
+    'Creado': '#FFD700',
+    'Confirmado': '#1E90FF',
+    'En Proceso': '#32CD32',
+    'Finalizado': '#A9A9A9'
+  };
+
+  let container = document.createElement("div");
+  container.style.display = "flex";
+  container.style.flexDirection = "column";
+  container.style.fontSize = "12px";
+  container.style.padding = "5px";
+  container.style.borderRadius = '5px';
+  container.style.backgroundColor = colores[estado];
+  container.style.color = 'white';
+
+  let hora = document.createElement("strong");
+  hora.innerText = event.hora || 'Hora no asignada';
+
+  let descripcion = document.createElement("span");
+  descripcion.innerText = event.descripcion || 'Sin descripción';
+
+  let masajista = document.createElement("span");
+  masajista.innerText = `Masajista: ${event.masajista || 'Sin asignar'}`;
+
+  let cliente = document.createElement("span");
+  cliente.innerText = `Cliente: ${event.cliente}`;
+
+  const estadoEl = document.createElement('span');
+  estadoEl.innerText = `Estado: ${estado}`;
+  estadoEl.style.fontWeight = 'bold';
+
+  container.appendChild(hora);
+  container.appendChild(descripcion);
+  container.appendChild(masajista);
+  container.appendChild(cliente);
+  container.appendChild(estadoEl);
+
+  return { domNodes: [container] };
+}
+
+// 📌 Función para determinar el estado de la cita basado en la hora actual
+function determinarEstado(event) {
+  const ahora = new Date(); // Hora actual
+  const fechaEvento = new Date(event.start); // Fecha del evento
+
+  // Extraemos hora de inicio y fin del rango
+  const [horaInicio, horaFin] = event.hora.split(' - ');
+
+  // Convertimos hora de inicio a Date
+  const [inicioHoras, inicioMinutos] = horaInicio.split(':').map(Number);
+  const fechaInicio = new Date(fechaEvento);
+  fechaInicio.setHours(inicioHoras, inicioMinutos, 0, 0);  // Aseguramos que los milisegundos estén en 0
+
+  // Convertimos hora de fin a Date
+  const [finHoras, finMinutos] = horaFin.split(':').map(Number);
+  const fechaFin = new Date(fechaEvento);
+  fechaFin.setHours(finHoras, finMinutos, 0, 0);
+
+
+const ahoraUTC = new Date(ahora.toLocaleString('en-US', { timeZone: 'UTC' }));
+console.log("Hora en UTC:", ahoraUTC.toISOString());
+
+
+  // 📌 Determinamos el estado según la hora actual
+  if (ahora < fechaInicio) {
+    return 'Confirmado';  // La cita aún no ha comenzado
+  } else if (ahora >= fechaInicio && ahora <= fechaFin) {
+    return 'En Proceso';  // La cita está ocurriendo
+  } else {
+    return 'Finalizado';  // La cita ya terminó
+  }
+}
 
 // ✅ Hacer que los clientes sean "arrastrables"
 onMounted(() => {
@@ -131,19 +236,37 @@ onMounted(() => {
   });
 });
 
-// ✅ Crear nueva cita
+// ✅ Validar si el masajista ya tiene una cita en la misma fecha y hora
+const estaMasajistaOcupado = (masajista, fecha, hora, eventoId = null) => {
+  return calendarEvents.value.some(evento => 
+    evento.masajista === masajista &&
+    evento.start === fecha &&
+    evento.hora === hora &&
+    evento.id !== eventoId // Para que no bloquee la misma cita que se está editando
+  );
+};
+
+// ✅ Crear nueva cita con validación
 const agendarCita = () => {
   if (!selectedMasajista.value || !hora.value) {
     alert('Por favor, completa todos los campos.');
     return;
   }
 
+  // Validamos si el masajista ya tiene una cita en esa fecha y hora
+  if (estaMasajistaOcupado(selectedMasajista.value.nombre, selectedDate.value, hora.value)) {
+    alert(`El masajista ${selectedMasajista.value.nombre} ya tiene una cita a las ${hora.value}. Por favor, selecciona otra hora.`);
+    return;
+  }
+
   const nuevaCita = {
     id: generateUniqueId(),
+    cliente: selectedCliente.value.nombre,
     title: `Cita con ${selectedCliente.value.nombre}`,
     start: selectedDate.value,
-    masajista: selectedMasajista.value.nombre,
+    masajista: selectedMasajista.value ? selectedMasajista.value.nombre : 'Sin asignar',
     hora: hora.value,
+    descripcion: descripcion.value || 'Sin descripción',
     editable: true
   };
 
@@ -152,12 +275,18 @@ const agendarCita = () => {
   showDialog.value = false;
 };
 
-// ✅ Guardar edición del evento
+// ✅ Guardar edición del evento con validación
 const guardarEdicion = () => {
   const eventoIndex = calendarEvents.value.findIndex(evento => evento.id === selectedEvent.value.id);
   if (eventoIndex !== -1) {
-    calendarEvents.value[eventoIndex].masajista = selectedMasajista.value ? selectedMasajista.value.nombre : '';
+    // Validar si el masajista ya tiene una cita a esa hora (excepto en la misma reserva)
+    if (estaMasajistaOcupado(selectedMasajista.value.nombre, selectedEvent.value.start, hora.value, selectedEvent.value.id)) {
+      alert(`El masajista ${selectedMasajista.value.nombre} ya tiene una cita a las ${hora.value}. Por favor, selecciona otra hora.`);
+      return;
+    }
+    calendarEvents.value[eventoIndex].masajista = selectedMasajista.value ? selectedMasajista.value.nombre : 'Sin asignar';
     calendarEvents.value[eventoIndex].hora = hora.value || '';
+    calendarEvents.value[eventoIndex].descripcion = descripcion.value || 'Sin descripción';
   }
   actualizarEventos();
   showDialog.value = false;
@@ -176,6 +305,7 @@ const actualizarEventos = async () => {
   calendarOptions.value.events = [...calendarEvents.value];
 };
 </script>
+
 
 <style scoped>
 .container {
