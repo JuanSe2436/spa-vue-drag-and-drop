@@ -107,10 +107,14 @@ const calendarOptions = ref({
     center: 'title',
     right: 'dayGridMonth,timeGridWeek,timeGridDay'
   },
+  eventResize: (info) => {
+    info.revert();  // ❌ Siempre revertimos el cambio para que no se expanda
+  },
+
   eventContent: renderEventContent,
   eventClick: (info) => {
     selectedEvent.value = calendarEvents.value.find(evento => evento.id === info.event.id);
-    selectedCliente.value = { nombre: selectedEvent.value.title.replace("Cita con ", "") };
+    selectedCliente.value = { nombre: selectedEvent.value.cliente };
     selectedMasajista.value = masajistas.value.find(m => m.nombre === selectedEvent.value.masajista) || null;
     hora.value = selectedEvent.value.hora || null;
     descripcion.value = selectedEvent.value.descripcion || '';
@@ -252,6 +256,10 @@ const agendarCita = () => {
     alert('Por favor, completa todos los campos.');
     return;
   }
+  const fechaEvento = new Date(selectedDate.value);
+  const [horaInicio] = hora.value.split(' - ');
+  const [horas, minutos] = horaInicio.split(':').map(Number);
+  fechaEvento.setHours(horas, minutos, 0, 0);
 
   // Validamos si el masajista ya tiene una cita en esa fecha y hora
   if (estaMasajistaOcupado(selectedMasajista.value.nombre, selectedDate.value, hora.value)) {
@@ -263,11 +271,12 @@ const agendarCita = () => {
     id: generateUniqueId(),
     cliente: selectedCliente.value.nombre,
     title: `Cita con ${selectedCliente.value.nombre}`,
-    start: selectedDate.value,
-    masajista: selectedMasajista.value ? selectedMasajista.value.nombre : 'Sin asignar',
+    start: fechaEvento,
+    masajista: selectedMasajista.value.nombre,
     hora: hora.value,
-    descripcion: descripcion.value || 'Sin descripción',
-    editable: true
+    descripcion: descripcion.value,
+    editable: true,
+    allDay: false  // 📌 Aseguramos que no sea evento de todo el día
   };
 
   calendarEvents.value = [...calendarEvents.value, nuevaCita];
@@ -334,4 +343,16 @@ const actualizarEventos = async () => {
 .calendario {
   flex-grow: 1;
 }
+
+.fc-event-resizable .fc-resizer {
+  display: none !important;
+}
+
+.fc-event {
+  border: none !important;  /* Elimina cualquier borde */
+  box-shadow: none !important;  /* Quita la sombra si hay alguna */
+}
+
+
+
 </style>
